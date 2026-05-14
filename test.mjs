@@ -54,13 +54,17 @@ async function waitForHealth(baseUrl, child) {
   throw new Error("Server did not become healthy");
 }
 
-async function startServer(port) {
+async function startServer(port, envOverrides = {}) {
   const child = spawn(process.execPath, ["dist/index.js"], {
     cwd: root,
     env: {
       ...process.env,
       PORT: String(port),
-      DATA_DIR: dataDir
+      DATA_DIR: dataDir,
+      MCP_API_KEY: "",
+      PUBLIC_MCP_DISCOVERY: "",
+      XPAY_UPSTREAM_KEY: "",
+      ...envOverrides
     },
     stdio: ["ignore", "pipe", "pipe"]
   });
@@ -88,11 +92,12 @@ async function stopServer(child) {
   });
 }
 
-async function rpc(baseUrl, method, params = {}) {
+async function rpcRaw(baseUrl, method, params = {}, headers = {}) {
   const res = await fetch(baseUrl + "/mcp", {
     method: "POST",
     headers: {
-      "content-type": "application/json"
+      "content-type": "application/json",
+      ...headers
     },
     body: JSON.stringify({
       jsonrpc: "2.0",
@@ -103,6 +108,14 @@ async function rpc(baseUrl, method, params = {}) {
   });
 
   const json = await res.json();
+  return {
+    status: res.status,
+    json
+  };
+}
+
+async function rpc(baseUrl, method, params = {}, headers = {}) {
+  const { json } = await rpcRaw(baseUrl, method, params, headers);
 
   if (json.error) {
     throw new Error(method + " error: " + json.error.message);
@@ -331,6 +344,51 @@ try {
   }));
 
   check("scratchpad_delete returns deleted true", deleted.deleted === true);
+
+  await stopServer(server.child);
+
+  const authPort = await getFreePort();
+  server = await startServer(authPort, {
+    MCP_API_KEY: "test-secret",
+    PUBLIC_MCP_DISCOVERY: "true"
+  });
+
+  const publicInit = await rpc(server.baseUrl, "initialize", {
+    protocolVersion: "2024-11-05",
+    capabilities: {},
+    clientInfo: {
+      name: "xpay-validation",
+      version: "1.0.0"
+    }
+  });
+
+  check("unauthenticated initialize works with public discovery", publicInit.serverInfo.name === "handoff-mcp-server");
+
+  const publicTools = await rpc(server.baseUrl, "tools/list");
+  check("unauthenticated tools/list works with public discovery", Array.isArray(publicTools.tools));
+
+  const unauthTool = await rpcRaw(server.baseUrl, "tools/call", {
+    name: "scratchpad_get",
+    arguments: {
+      key: "deploy/status",
+      agent_id: "reviewer"
+    }
+  });
+
+  check("unauthenticated tools/call still returns 401", unauthTool.status === 401);
+
+  const authenticatedTool = parseTool(await rpc(server.baseUrl, "tools/call", {
+    name: "handoff_create",
+    arguments: {
+      from_agent: "authenticated-test",
+      task: "Authenticated tool call remains available",
+      priority: "normal"
+    }
+  }, {
+    "x-api-key": "test-secret"
+  }));
+
+  check("authenticated tools/call still works", typeof authenticatedTool.id === "string");
 
   console.log("");
   console.log(passed + "/" + total + " passed");

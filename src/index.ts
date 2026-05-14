@@ -46,6 +46,7 @@ const PROTOCOL = "2024-11-05";
 const PORT = Number(process.env.PORT || 3000);
 const DATA_DIR = process.env.DATA_DIR || "/data";
 const MCP_API_KEY = process.env.MCP_API_KEY || "";
+const PUBLIC_MCP_DISCOVERY = process.env.PUBLIC_MCP_DISCOVERY === "true";
 const XPAY_UPSTREAM_KEY = process.env.XPAY_UPSTREAM_KEY || "";
 
 function now(): string {
@@ -492,6 +493,22 @@ async function rpc(body: Record<string, unknown>): Promise<Record<string, unknow
   }
 }
 
+function isPublicDiscoveryMethod(method: string): boolean {
+  return method === "initialize" ||
+    method === "ping" ||
+    method === "tools/list" ||
+    method === "resources/list" ||
+    method === "prompts/list" ||
+    method === "notifications/initialized";
+}
+
+function allowsPublicDiscovery(body: Record<string, unknown> | Record<string, unknown>[]): boolean {
+  if (!PUBLIC_MCP_DISCOVERY) return false;
+
+  const items = Array.isArray(body) ? body : [body];
+  return items.every(item => isPublicDiscoveryMethod(String(item.method || "")));
+}
+
 function authorized(req: http.IncomingMessage, url: URL): boolean {
   if (XPAY_UPSTREAM_KEY && url.searchParams.get("upstream_key") === XPAY_UPSTREAM_KEY) {
     return true;
@@ -514,7 +531,7 @@ function send(res: http.ServerResponse, status: number, body: unknown): void {
     "content-type": "application/json; charset=utf-8",
     "access-control-allow-origin": "*",
     "access-control-allow-methods": "GET,POST,OPTIONS",
-    "access-control-allow-headers": "content-type,mcp-protocol-version",
+    "access-control-allow-headers": "content-type,mcp-protocol-version,authorization,x-api-key",
     "mcp-protocol-version": PROTOCOL
   });
   res.end(text);
@@ -541,7 +558,7 @@ async function handler(req: http.IncomingMessage, res: http.ServerResponse): Pro
     res.writeHead(204, {
       "access-control-allow-origin": "*",
       "access-control-allow-methods": "GET,POST,OPTIONS",
-      "access-control-allow-headers": "content-type,mcp-protocol-version"
+      "access-control-allow-headers": "content-type,mcp-protocol-version,authorization,x-api-key"
     });
     res.end();
     return;
@@ -577,14 +594,14 @@ async function handler(req: http.IncomingMessage, res: http.ServerResponse): Pro
     return;
   }
 
-  if (!authorized(req, url)) {
-    send(res, 401, { error: "Unauthorized" });
-    return;
-  }
-
   try {
     const raw = await read(req);
     const parsed = JSON.parse(raw) as Record<string, unknown> | Record<string, unknown>[];
+
+    if (!authorized(req, url) && !allowsPublicDiscovery(parsed)) {
+      send(res, 401, { error: "Unauthorized" });
+      return;
+    }
 
     if (Array.isArray(parsed)) {
       const out: Record<string, unknown>[] = [];
