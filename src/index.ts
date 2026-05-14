@@ -46,6 +46,7 @@ const PROTOCOL = "2024-11-05";
 const PORT = Number(process.env.PORT || 3000);
 const DATA_DIR = process.env.DATA_DIR || "/data";
 const MCP_API_KEY = process.env.MCP_API_KEY || "";
+const XPAY_UPSTREAM_KEY = process.env.XPAY_UPSTREAM_KEY || "";
 
 function now(): string {
   return new Date().toISOString();
@@ -491,7 +492,11 @@ async function rpc(body: Record<string, unknown>): Promise<Record<string, unknow
   }
 }
 
-function authorized(req: http.IncomingMessage): boolean {
+function authorized(req: http.IncomingMessage, url: URL): boolean {
+  if (XPAY_UPSTREAM_KEY && url.searchParams.get("upstream_key") === XPAY_UPSTREAM_KEY) {
+    return true;
+  }
+
   if (!MCP_API_KEY) return true;
 
   const bearer = req.headers.authorization;
@@ -572,7 +577,7 @@ async function handler(req: http.IncomingMessage, res: http.ServerResponse): Pro
     return;
   }
 
-  if (!authorized(req)) {
+  if (!authorized(req, url)) {
     send(res, 401, { error: "Unauthorized" });
     return;
   }
