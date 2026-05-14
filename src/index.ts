@@ -46,8 +46,7 @@ const PROTOCOL = "2024-11-05";
 const PORT = Number(process.env.PORT || 3000);
 const DATA_DIR = process.env.DATA_DIR || "/data";
 const MCP_API_KEY = process.env.MCP_API_KEY || "";
-const PUBLIC_MCP_DISCOVERY = process.env.PUBLIC_MCP_DISCOVERY === "true";
-const XPAY_UPSTREAM_KEY = process.env.XPAY_UPSTREAM_KEY || "";
+const PUBLIC_MCP_DISCOVERY = process.env.PUBLIC_MCP_DISCOVERY !== "false";
 
 function now(): string {
   return new Date().toISOString();
@@ -509,11 +508,7 @@ function allowsPublicDiscovery(body: Record<string, unknown> | Record<string, un
   return items.every(item => isPublicDiscoveryMethod(String(item.method || "")));
 }
 
-function authorized(req: http.IncomingMessage, url: URL): boolean {
-  if (XPAY_UPSTREAM_KEY && url.searchParams.get("upstream_key") === XPAY_UPSTREAM_KEY) {
-    return true;
-  }
-
+function authorized(req: http.IncomingMessage): boolean {
   if (!MCP_API_KEY) return true;
 
   const bearer = req.headers.authorization;
@@ -598,7 +593,7 @@ async function handler(req: http.IncomingMessage, res: http.ServerResponse): Pro
     const raw = await read(req);
     const parsed = JSON.parse(raw) as Record<string, unknown> | Record<string, unknown>[];
 
-    if (!authorized(req, url) && !allowsPublicDiscovery(parsed)) {
+    if (!authorized(req) && !allowsPublicDiscovery(parsed)) {
       send(res, 401, { error: "Unauthorized" });
       return;
     }

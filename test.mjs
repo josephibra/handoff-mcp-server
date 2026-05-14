@@ -55,17 +55,22 @@ async function waitForHealth(baseUrl, child) {
 }
 
 async function startServer(port, envOverrides = {}) {
+  const env = {
+    ...process.env,
+    PORT: String(port),
+    DATA_DIR: dataDir,
+    MCP_API_KEY: "",
+    XPAY_UPSTREAM_KEY: "",
+    ...envOverrides
+  };
+
+  if (!Object.hasOwn(envOverrides, "PUBLIC_MCP_DISCOVERY")) {
+    delete env.PUBLIC_MCP_DISCOVERY;
+  }
+
   const child = spawn(process.execPath, ["dist/index.js"], {
     cwd: root,
-    env: {
-      ...process.env,
-      PORT: String(port),
-      DATA_DIR: dataDir,
-      MCP_API_KEY: "",
-      PUBLIC_MCP_DISCOVERY: "",
-      XPAY_UPSTREAM_KEY: "",
-      ...envOverrides
-    },
+    env,
     stdio: ["ignore", "pipe", "pipe"]
   });
 
@@ -111,6 +116,24 @@ async function rpcRaw(baseUrl, method, params = {}, headers = {}) {
   return {
     status: res.status,
     json
+  };
+}
+
+async function postRpcRaw(baseUrl, body, headers = {}) {
+  const res = await fetch(baseUrl + "/mcp", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      ...headers
+    },
+    body: JSON.stringify(body)
+  });
+
+  const text = await res.text();
+  return {
+    status: res.status,
+    text,
+    json: text ? JSON.parse(text) : undefined
   };
 }
 
@@ -349,8 +372,7 @@ try {
 
   const authPort = await getFreePort();
   server = await startServer(authPort, {
-    MCP_API_KEY: "test-secret",
-    PUBLIC_MCP_DISCOVERY: "true"
+    MCP_API_KEY: "test-secret"
   });
 
   const publicInit = await rpc(server.baseUrl, "initialize", {
@@ -362,10 +384,26 @@ try {
     }
   });
 
-  check("unauthenticated initialize works with public discovery", publicInit.serverInfo.name === "handoff-mcp-server");
+  check("unauthenticated initialize works with public discovery enabled by default", publicInit.serverInfo.name === "handoff-mcp-server");
+
+  const publicPing = await rpc(server.baseUrl, "ping");
+  check("unauthenticated ping works with public discovery", typeof publicPing === "object");
 
   const publicTools = await rpc(server.baseUrl, "tools/list");
   check("unauthenticated tools/list works with public discovery", Array.isArray(publicTools.tools));
+
+  const publicResources = await rpc(server.baseUrl, "resources/list");
+  check("unauthenticated resources/list works with public discovery", Array.isArray(publicResources.resources));
+
+  const publicPrompts = await rpc(server.baseUrl, "prompts/list");
+  check("unauthenticated prompts/list works with public discovery", Array.isArray(publicPrompts.prompts));
+
+  const publicInitialized = await postRpcRaw(server.baseUrl, {
+    jsonrpc: "2.0",
+    method: "notifications/initialized",
+    params: {}
+  });
+  check("unauthenticated notifications/initialized works with public discovery", publicInitialized.status === 202);
 
   const unauthTool = await rpcRaw(server.baseUrl, "tools/call", {
     name: "scratchpad_get",
@@ -376,6 +414,48 @@ try {
   });
 
   check("unauthenticated tools/call still returns 401", unauthTool.status === 401);
+
+  const unauthUpstreamTool = await fetch(server.baseUrl + "/mcp?upstream_key=test-secret", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: id++,
+      method: "tools/call",
+      params: {
+        name: "scratchpad_get",
+        arguments: {
+          key: "deploy/status",
+          agent_id: "reviewer"
+        }
+      }
+    })
+  });
+  check("upstream_key does not bypass MCP_API_KEY for tools/call", unauthUpstreamTool.status === 401);
+
+  const unauthBatch = await postRpcRaw(server.baseUrl, [
+    {
+      jsonrpc: "2.0",
+      id: id++,
+      method: "initialize",
+      params: {}
+    },
+    {
+      jsonrpc: "2.0",
+      id: id++,
+      method: "tools/call",
+      params: {
+        name: "scratchpad_get",
+        arguments: {
+          key: "deploy/status",
+          agent_id: "reviewer"
+        }
+      }
+    }
+  ]);
+  check("unauthenticated batch with tools/call returns 401", unauthBatch.status === 401);
 
   const authenticatedTool = parseTool(await rpc(server.baseUrl, "tools/call", {
     name: "handoff_create",
@@ -389,6 +469,27 @@ try {
   }));
 
   check("authenticated tools/call still works", typeof authenticatedTool.id === "string");
+
+  await stopServer(server.child);
+
+  const disabledPort = await getFreePort();
+  server = await startServer(disabledPort, {
+    MCP_API_KEY: "test-secret",
+    PUBLIC_MCP_DISCOVERY: "false"
+  });
+
+  const disabledInit = await rpcRaw(server.baseUrl, "initialize", {
+    protocolVersion: "2024-11-05",
+    capabilities: {},
+    clientInfo: {
+      name: "xpay-validation",
+      version: "1.0.0"
+    }
+  });
+  check("unauthenticated initialize returns 401 when public discovery is false", disabledInit.status === 401);
+
+  const disabledTools = await rpcRaw(server.baseUrl, "tools/list");
+  check("unauthenticated tools/list returns 401 when public discovery is false", disabledTools.status === 401);
 
   console.log("");
   console.log(passed + "/" + total + " passed");
