@@ -1,0 +1,19 @@
+{
+  "name": "handoff-mcp-server",
+  "version": "1.0.0",
+  "description": "Deploy-once MCP handoff and scratchpad server with file persistence.",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "test": "node test.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.24",
+    "typescript": "^5.8.2"
+  }
+}

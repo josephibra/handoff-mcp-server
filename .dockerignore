@@ -1,0 +1,8 @@
+node_modules
+data
+.test-data
+.git
+.gitignore
+*.log
+README.md
+test.mjs
