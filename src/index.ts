@@ -622,6 +622,11 @@ async function makeStore(): Promise<Store> {
 }
 
 async function main(): Promise<void> {
+  if (process.env.NODE_ENV === "production" && !MCP_API_KEY) {
+    console.error("FATAL: MCP_API_KEY is required in production.");
+    process.exit(1);
+  }
+
   store = await makeStore();
 
   const server = http.createServer((req, res) => {
