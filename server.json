@@ -1,0 +1,20 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.josephibra/handoff-mcp-server",
+  "description": "Durable agent-to-agent handoffs and shared scratchpad for multi-agent workflows.",
+  "repository": {
+    "url": "https://github.com/josephibra/handoff-mcp-server",
+    "source": "github"
+  },
+  "version": "1.0.2",
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://handoff-mcp-server-production.mcp.xpay.sh/mcp"
+    },
+    {
+      "type": "streamable-http",
+      "url": "https://handoff-mcp-server-production.up.railway.app/mcp"
+    }
+  ]
+}

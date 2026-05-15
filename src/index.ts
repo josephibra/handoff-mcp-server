@@ -47,6 +47,7 @@ const PORT = Number(process.env.PORT || 3000);
 const DATA_DIR = process.env.DATA_DIR || "/data";
 const MCP_API_KEY = process.env.MCP_API_KEY || "";
 const PUBLIC_MCP_DISCOVERY = process.env.PUBLIC_MCP_DISCOVERY !== "false";
+const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || "";
 
 function now(): string {
   return new Date().toISOString();
@@ -532,6 +533,21 @@ function send(res: http.ServerResponse, status: number, body: unknown): void {
   res.end(text);
 }
 
+function sendText(res: http.ServerResponse, status: number, contentType: string, text: string): void {
+  res.writeHead(status, {
+    "content-type": contentType,
+    "access-control-allow-origin": "*",
+    "access-control-allow-methods": "GET,POST,OPTIONS",
+    "access-control-allow-headers": "content-type,mcp-protocol-version,authorization,x-api-key"
+  });
+  res.end(text);
+}
+
+function publicUrl(pathname: string): string {
+  if (PUBLIC_BASE_URL) return PUBLIC_BASE_URL.replace(/\/+$/, "") + pathname;
+  return pathname;
+}
+
 async function read(req: http.IncomingMessage): Promise<string> {
   const chunks: Buffer[] = [];
   let size = 0;
@@ -576,6 +592,52 @@ async function handler(req: http.IncomingMessage, res: http.ServerResponse): Pro
       mcp_endpoint: "/mcp",
       health_endpoint: "/health"
     });
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/robots.txt") {
+    sendText(
+      res,
+      200,
+      "text/plain; charset=utf-8",
+      `User-agent: *\nAllow: /\nSitemap: ${publicUrl("/sitemap.xml")}\n`
+    );
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/llms.txt") {
+    sendText(
+      res,
+      200,
+      "text/plain; charset=utf-8",
+      [
+        "# handoff-mcp-server",
+        "",
+        "Durable handoffs and shared scratchpad for multi-agent workflows.",
+        "",
+        `- MCP endpoint: ${publicUrl("/mcp")}`,
+        `- Health endpoint: ${publicUrl("/health")}`,
+        `- Tools list: ${publicUrl("/mcp")} (POST tools/list JSON-RPC)`
+      ].join("\n")
+    );
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/sitemap.xml") {
+    sendText(
+      res,
+      200,
+      "application/xml; charset=utf-8",
+      [
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
+        "<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">",
+        `  <url><loc>${publicUrl("/")}</loc></url>`,
+        `  <url><loc>${publicUrl("/health")}</loc></url>`,
+        `  <url><loc>${publicUrl("/mcp")}</loc></url>`,
+        `  <url><loc>${publicUrl("/llms.txt")}</loc></url>`,
+        "</urlset>"
+      ].join("\n")
+    );
     return;
   }
 
